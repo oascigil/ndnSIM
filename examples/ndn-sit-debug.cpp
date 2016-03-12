@@ -121,6 +121,7 @@ main(int argc, char* argv[])
   LogComponentEnable("ndn.Consumer", LOG_PREFIX_ALL); 
   LogComponentEnable("ndn.cs.Lru", LOG_PREFIX_ALL); 
   LogComponentEnable("SitDebug", LOG_PREFIX_ALL);  
+  LogComponentEnable("ndn.cs.ProbabilityImpl", LOG_PREFIX_ALL);  
   //Parameters of the simulation (to be read from the command line)
   int num_contents;
   double connection_rate;
@@ -310,12 +311,12 @@ main(int argc, char* argv[])
   // The number of each content connected at each node
   std::map<int, int> connected_content[consumer_apps.GetN()];
   std::map<int, int> requested_content;
-  do 
-  {
-	 uint32_t app_indx = rnd_gen()%(consumer_apps.GetN());
+  //do 
+  //{
+	 uint32_t app_indx = 2; //rnd_gen()%(consumer_apps.GetN());
     ns3::Application *app_ptr = PeekPointer(consumer_apps.Get(app_indx));
     ndn::ConsumerSit *cons = reinterpret_cast<ndn::ConsumerSit *>(app_ptr);
-    uint32_t content_indx = content_dist.GetNextSeq();
+    uint32_t content_indx = num_contents-1; //content_dist.GetNextSeq();
 	 NS_LOG_INFO( "CON "<<app_to_node[app_indx]<<" "<<content_indx<<" "<<connect_time);
 	 if(bcast_enabled)
       Simulator::Schedule(Seconds(connect_time), &ndn::Consumer::FloodPacketWithSeq, cons, content_indx, bcast_scope);
@@ -330,7 +331,27 @@ main(int argc, char* argv[])
       requested_content[content_indx]++;
       num_contents_requested_init++;
     }
-  }while(connect_time < initialization_period_length);
+
+
+	 app_indx = 6; //rnd_gen()%(consumer_apps.GetN());
+    app_ptr = PeekPointer(consumer_apps.Get(app_indx));
+    cons = reinterpret_cast<ndn::ConsumerSit *>(app_ptr);
+    content_indx = num_contents-1; //content_dist.GetNextSeq();
+	 NS_LOG_INFO( "CON "<<app_to_node[app_indx]<<" "<<content_indx<<" "<<connect_time);
+	 if(bcast_enabled)
+      Simulator::Schedule(Seconds(connect_time), &ndn::Consumer::FloodPacketWithSeq, cons, content_indx, bcast_scope);
+	 else
+      Simulator::Schedule(Seconds(connect_time), &ndn::Consumer::SendPacketWithSeq, cons, content_indx);
+	 num_connected++;
+    connect_time = connect_time + rng_exp_con(rnd_gen);
+	 // Bookkeeping of connected contents, their locations and numbers
+	 connected_content[app_indx][content_indx]++;
+    if(!requested_content[content_indx])
+    {
+      requested_content[content_indx]++;
+      num_contents_requested_init++;
+    }
+  //}while(connect_time < initialization_period_length);
   
   NS_LOG_INFO("Number of connected applications during initialization: "<<num_connected);
   NS_LOG_INFO("Number of contents requested during initialization: "<<num_contents_requested_init);
@@ -402,6 +423,7 @@ main(int argc, char* argv[])
 		  Ptr<ndn::L3Protocol> p =  ndn::L3Protocol::getL3Protocol(n);
 		  shared_ptr<nfd::Forwarder> f = p->getForwarder();
 		  ns3::Ptr<ns3::ndn::ContentStore> cs = f->getContentStore();
+        NS_LOG_INFO("RMV_Content "<<content); 
 		  Simulator::Schedule(Seconds(disconnect_time), (&ns3::ndn::ContentStore::Remove), cs, content);
 		}
 		num_connected--;

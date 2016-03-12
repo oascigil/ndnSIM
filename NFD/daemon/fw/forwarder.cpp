@@ -146,8 +146,34 @@ Forwarder::onContentStoreMiss(const Face& inFace,
   this->setUnsatisfyTimer(pitEntry);
 
 // FIB lookup
-//  shared_ptr<fib::Entry> fibEntry = m_fib.findLongestPrefixMatch(*pitEntry);
+   shared_ptr<fib::Entry> fibEntry = m_fib.findLongestPrefixMatch(*pitEntry); //NDN
+	    
+ /* Flooding:
+  shared_ptr<fib::Entry> fibEntry = m_fib.findLongestPrefixMatch(*pitEntry); //NDN
+  if(m_fib.isEmpty(fibEntry))
+  {
+    unsigned int hopCount = 0;
+    auto ns3PacketTag = interest.getTag<ns3::ndn::Ns3PacketTag>();
+    if (ns3PacketTag != nullptr) // e.g., packet came from local node's cache
+    {
+      ns3::ndn::FwHopCountTag hopCountTag;
+      if (ns3PacketTag->getPacket()->PeekPacketTag(hopCountTag)) {
+        hopCount = hopCountTag.Get();
+        NFD_LOG_DEBUG("Interest Hop count: " << hopCount);
+      }
+    }
+    if(hopCount < interest.getFloodFlag())
+    {
+      NFD_LOG_DEBUG("PIT Entry Flood Flag is set: " << interest.getFloodFlag());
+	   (*pitEntry).setFloodFlag(); 
+    }
+    else
+      NFD_LOG_DEBUG("Won't Flood, Scope is complete: " << interest.getName());
+  }
+ */ // End of Flooding
 
+
+/*
   shared_ptr<fib::Entry> fibEntry;
   shared_ptr<fib::Entry> sitEntry;
   // FIB lookup
@@ -183,8 +209,8 @@ Forwarder::onContentStoreMiss(const Face& inFace,
 			}
 	    }
 
-	   //flood if no SIT match
-      fibEntry = m_fib.findLongestPrefixMatch(*pitEntry);
+	    //flood if no SIT match
+       fibEntry = m_fib.findLongestPrefixMatch(*pitEntry);
       if(m_fib.isEmpty(fibEntry)) 
 		{ //check SIT table
         sitEntry = m_sit.findExactMatch((*pitEntry).getName());         
@@ -226,7 +252,7 @@ Forwarder::onContentStoreMiss(const Face& inFace,
 	   fibEntry = sitEntry;
 	 }
   }
-
+*/
   // dispatch to strategy
   this->dispatchToStrategy(pitEntry, bind(&Strategy::afterReceiveInterest, _1,
                                           cref(inFace), cref(interest), fibEntry, pitEntry));
@@ -337,7 +363,7 @@ Forwarder::onOutgoingInterest(shared_ptr<pit::Entry> pitEntry, Face& outFace,
   { 
     NFD_LOG_DEBUG("onOutgoingInterest"<< 
                 " name=" << interest->getName() << " FloodFlag " << interest->getFloodFlag()<<" Destination Flag "<<interest->getDestinationFlag());
-    NFD_LOG_INFO("onOutgoingInterest " << interest->getName().at(-1).toSequenceNumber());
+    //NFD_LOG_INFO("onOutgoingInterest " << interest->getName().at(-1).toSequenceNumber());
   }
 
   // insert OutRecord

@@ -30,6 +30,9 @@
 // for removing fib entries
 #include "ns3/ndnSIM/helper/ndn-fib-helper.hpp"
 
+// for removing cache entries
+#include "ns3/ndnSIM/model/cs/ndn-content-store.hpp"
+
 // for scheduling application-level events (e.g., SendPacket)
 #include "ns3/ndnSIM/apps/ndn-consumer.hpp"
 #include "ns3/ndnSIM/apps/ndn-consumer-cbr.hpp"
@@ -45,6 +48,14 @@
 
 // for generating Zipf distributed content
 #include "ns3/ndnSIM/apps/ndn-consumer-zipf-mandelbrot.hpp"
+
+#include "ns3/log.h"
+
+// for obtaining forwarder of a node
+#include "ns3/ndnSIM/model/ndn-l3-protocol.hpp"
+
+//string comparison case insensitive
+#include <boost/algorithm/string.hpp>
 
 namespace ns3 {
 
@@ -82,7 +93,7 @@ namespace ns3 {
  *     NS_LOG=ndn.Consumer:ndn.Producer ./waf --run=ndn-simple-with-link-failure
  */
 
-NS_LOG_COMPONENT_DEFINE ("SitFloodTest");
+NS_LOG_COMPONENT_DEFINE ("SitTest");
 
 template<typename T>
 void set_new_lambda(std::exponential_distribution<T> *exp_dis, T val)
@@ -100,10 +111,18 @@ TargetType convert(const std::string& value) {
 
     return converted;
 }
-
+// Run with: NS_LOG=ndn.Consumer=info:SitTest=info:ndn.cs.Lru=info:nfd.FibManager=info:nfd.Forwarder=info:nfd.Cfib=info:nfd.FibEntry=info
 int
 main(int argc, char* argv[])
 {
+  LogComponentEnable("nfd.Forwarder", LOG_PREFIX_ALL);  //print time, node , etc. information for each log
+  LogComponentEnable("nfd.FibManager", LOG_PREFIX_ALL); 
+  LogComponentEnable("nfd.Cfib", LOG_PREFIX_ALL); 
+  LogComponentEnable("nfd.FibEntry", LOG_PREFIX_ALL);  
+  LogComponentEnable("ndn.Consumer", LOG_PREFIX_ALL); 
+  LogComponentEnable("ndn.cs.Lru", LOG_PREFIX_ALL); 
+  LogComponentEnable("SitTest", LOG_PREFIX_ALL);  
+  LogComponentEnable("ndn.cs.ProbabilityImpl", LOG_PREFIX_ALL);  
   //Parameters of the simulation (to be read from the command line)
   int num_contents;
   double connection_rate;
@@ -113,11 +132,14 @@ main(int argc, char* argv[])
   double zipf_exponent;
   int cache_size;
   std::string topology_file;
+  std::string strategy;
+  bool bcast_enabled=false;
+  uint32_t bcast_scope = 0;
+  double probability = 1; //for probabilistic
 
-  //std::cout<<"Number of arguments: "<<argc<<"\n";
-  if(argc < 10)
+  if(argc < 13)
   {
-    std::cout<<"Invalid number of parameters: "<<argc<<", Expecting 10\n";
+    std::cout<<"Invalid number of parameters: "<<argc<<", Expecting 12\n";
     exit(0);
   }
 
@@ -136,19 +158,12 @@ main(int argc, char* argv[])
   cmd.AddValue ("zipf_exponent", "Content popularity dist. zipf exponent", zipf_exponent);
   cmd.AddValue ("cache_size", "Size of the cache on routers", cache_size);
   cmd.AddValue ("topology_file", "Name of the topology file", topology_file);
+  cmd.AddValue ("bcast_enabled", "Is flooding enabled", bcast_enabled);
+  cmd.AddValue ("bcast_scope", "Scope (in number of hops) of flooding", bcast_scope);
+  cmd.AddValue ("probability", "Probability of caching", probability);
+  cmd.AddValue ("strategy", "Forwarding strategy: send to all or one", strategy);
   cmd.Parse(argc, argv);
   
-  NS_LOG_INFO("Params");
-  NS_LOG_INFO("num_contents "<<num_contents);
-  NS_LOG_INFO("connection_rate "<<connection_rate);
-  NS_LOG_INFO("disconnection_rate "<<disconnection_rate);
-  NS_LOG_INFO("initialization_period_length "<<initialization_period_length);
-  NS_LOG_INFO("observation_period_length "<<observation_period_length);
-  NS_LOG_INFO("zipf_exponent "<<zipf_exponent);
-  NS_LOG_INFO("cache_size "<<cache_size);
-  NS_LOG_INFO("topology_file "<<topology_file);
-  NS_LOG_INFO("End_of_Params");
-
 // Prepare the Topology
   // Read Rocketfuel topology and set producer 
   RocketfuelParams params;
@@ -167,23 +182,42 @@ main(int argc, char* argv[])
   params.maxg2cDelay = "3ms";
   params.maxg2cBandwidth = "10Mbps";
 
-/*
+///*
   RocketfuelMapReader topo_reader("", 10);
-  std::string topo_file_name = "/home/onur/Downloads/rocketfuel_maps_cch/" + topology_file;
+  std::string topo_file_name = "/home/uceeoas/maps/" + topology_file;
   topo_reader.SetFileName(topo_file_name);
   NodeContainer nodes = topo_reader.Read(params, true, true);
-*/
+//*/
   // Read network (infrastructure) topology from a file 
+  /*
   AnnotatedTopologyReader topologyReader("", 10);
-  topologyReader.SetFileName("src/ndnSIM/examples/topologies/topo-grid-3x3-producer-attached.txt");
-  NodeContainer nodes = topologyReader.Read();
+  std::string topo_file_name = "src/ndnSIM/examples/topologies/" + topology_file;
+  topologyReader.SetFileName(topo_file_name);
+  NodeContainer nodes = topologyReader.Read();*/
+
+  NS_LOG_INFO("Params");
+  NS_LOG_INFO("num_contents "<<num_contents);
+  NS_LOG_INFO("connection_rate "<<connection_rate);
+  NS_LOG_INFO("disconnection_rate "<<disconnection_rate);
+  NS_LOG_INFO("initialization_period_length "<<initialization_period_length);
+  NS_LOG_INFO("observation_period_length "<<observation_period_length);
+  NS_LOG_INFO("zipf_exponent "<<zipf_exponent);
+  NS_LOG_INFO("cache_size "<<cache_size);
+  NS_LOG_INFO("topology_file "<<topology_file);
+  NS_LOG_INFO("bcast_enabled? "<<bcast_enabled);
+  NS_LOG_INFO("bcast_scope "<<bcast_scope);
+  NS_LOG_INFO("Probability of caching "<<probability);
+  NS_LOG_INFO("Forwarding Strategy "<<strategy);
+  NS_LOG_INFO("End_of_Params");
+
   NS_LOG_INFO("Number_of_infrastructure_nodes: "<<nodes.GetN()); 
   uint32_t num_infrastructure_nodes = nodes.GetN();
 
-  //Attach a (consumer) node to each router in the topology
   std::map<int, int > app_to_node; //maps app index to access node index
   std::map<int, int > access_to_router; //maps access node index to the next hop router index
-  uint32_t num_connected = 0;
+  uint32_t num_connected = 0; //number of connected applications/users
+  uint32_t num_contents_requested_init=0;  //number of unique content items requested during initialization
+
   // for each of the n infrastructure node attach a user node
   // n-1 customer nodes and a producer node
   NodeContainer consumer_nodes, producer_node, infrastructure_nodes;
@@ -192,7 +226,7 @@ main(int argc, char* argv[])
   nodes.Add(consumer_nodes);
   nodes.Add(producer_node);
   PointToPointHelper p2p;
-  //NS_LOG_INFO("Num total nodes: "<<nodes.GetN());
+  //Attach an endpoint node (NFD) to each router in the topology
   for(uint32_t i = 0; i < num_infrastructure_nodes; i++)
   {
     p2p.Install(nodes.Get(i), nodes.Get(i+num_infrastructure_nodes));
@@ -201,23 +235,39 @@ main(int argc, char* argv[])
     //access_to_router.insert(std::make_pair(i+num_infrastructure_nodes, i));
 	 access_to_router[i+num_infrastructure_nodes] = i;
   }
+  // Save the nodes in the topology (not the consumer nodes) in a container
   for(uint32_t i = 0; i < num_infrastructure_nodes; i++)
   {
     infrastructure_nodes.Add(nodes.Get(i));
   }
-// Install NDN stack on all nodes
+// Install Content Store: Infrastructure nodes get limited storage
   ndn::StackHelper ndnHelperCaching;
-  ndnHelperCaching.SetOldContentStore("ns3::ndn::cs::Lru", "MaxSize", std::to_string(cache_size));
+  if(probability == 1)
+  {
+    ndnHelperCaching.SetOldContentStore("ns3::ndn::cs::Lru", "MaxSize", std::to_string(cache_size));
+  }
+  else
+  {
+    ndnHelperCaching.SetOldContentStore("ns3::ndn::cs::Probability::Lru", "MaxSize", std::to_string(cache_size), "CacheProbability", std::to_string(probability));
+  }
   ndnHelperCaching.Install(infrastructure_nodes);
-  
+// Endpoint nodes get unlimited cache (this cache is the storage of all the applications connected to an infrastructure node)
   ndn::StackHelper ndnHelperInfCaching;
   ndnHelperInfCaching.SetOldContentStore("ns3::ndn::cs::Lru", "MaxSize", std::to_string(num_contents));
   ndnHelperInfCaching.Install(consumer_nodes);
   ndnHelperInfCaching.Install(producer_node);
 
   // Set BestRoute strategy
-  ndn::StrategyChoiceHelper::InstallAll("/", "/localhost/nfd/strategy/best-route");
-
+  if (boost::iequals(strategy, "ALL"))
+  {
+    ndn::StrategyChoiceHelper::InstallAll("/", "/localhost/nfd/strategy/multicast"); //multicast strategy
+    std::cout<<"Multicast\n";
+  }
+  else
+  {
+    ndn::StrategyChoiceHelper::InstallAll("/", "/localhost/nfd/strategy/best-route"); //best-route-strategy2.cpp
+    std::cout<<"Unicast\n";
+  }
   // Installing global routing interface on all nodes
   ndn::GlobalRoutingHelper ndnGlobalRoutingHelper;
   ndnGlobalRoutingHelper.InstallAll();
@@ -262,23 +312,36 @@ main(int argc, char* argv[])
   std::mt19937 rnd_gen (rd ()); //initialize the random number generator
   // The number of each content connected at each node
   std::map<int, int> connected_content[consumer_apps.GetN()];
+  std::map<int, int> requested_content;
   do 
   {
 	 uint32_t app_indx = rnd_gen()%(consumer_apps.GetN());
     ns3::Application *app_ptr = PeekPointer(consumer_apps.Get(app_indx));
     ndn::ConsumerSit *cons = reinterpret_cast<ndn::ConsumerSit *>(app_ptr);
     uint32_t content_indx = content_dist.GetNextSeq();
-	 NS_LOG_INFO( "CON "<<app_to_node[app_indx]<<" "<<content_indx<<" "<<connect_time);
-    Simulator::Schedule(Seconds(connect_time), &ndn::Consumer::FloodPacketWithSeq, cons, content_indx,2);
+	 //NS_LOG_INFO( "CON "<<app_to_node[app_indx]<<" "<<content_indx<<" "<<connect_time);
+	 if(bcast_enabled)
+      Simulator::Schedule(Seconds(connect_time), &ndn::Consumer::FloodPacketWithSeq, cons, content_indx, bcast_scope);
+	 else
+      Simulator::Schedule(Seconds(connect_time), &ndn::Consumer::SendPacketWithSeq, cons, content_indx);
 	 num_connected++;
     connect_time = connect_time + rng_exp_con(rnd_gen);
 	 // Bookkeeping of connected contents, their locations and numbers
 	 connected_content[app_indx][content_indx]++;
+    if(!requested_content[content_indx])
+    {
+      requested_content[content_indx]++;
+      num_contents_requested_init++;
+    }
   }while(connect_time < initialization_period_length);
+  
+  NS_LOG_INFO("Number of connected applications during initialization: "<<num_connected);
+  NS_LOG_INFO("Number of contents requested during initialization: "<<num_contents_requested_init);
 
-//Disconnect Producer from the topology and notify all routers
+  //Disconnect Producer from the topology and notify all routers 
   //Remove all the FIB table entries for /prefix from all nodes
-  const ndn::Name n("ndn://" + prefix); 
+  const ndn::Name n("ndn://" + prefix);
+  
   for(uint32_t indx = 0; indx < num_infrastructure_nodes; indx++)
   {
     Simulator::Schedule(Seconds(initialization_period_length), (void (*)(Ptr<Node>, const ndn::Name&)) (&ndn::FibHelper::RemoveRoute), nodes.Get(indx), n);
@@ -289,6 +352,8 @@ main(int argc, char* argv[])
   /***  Observation Period: ***/ 
   connect_time = initialization_period_length + 0.2;
   disconnect_time = connect_time;
+  uint32_t num_disconnections=0;
+  uint32_t num_connections=0;
   double connect_time_next;
 	 
   NS_LOG_INFO("Beginning of Observation Period");
@@ -300,12 +365,16 @@ main(int argc, char* argv[])
     ndn::ConsumerSit *cons = reinterpret_cast<ndn::ConsumerSit *>(app_ptr);
     uint32_t content_indx = content_dist.GetNextSeq();
 	 num_connected++;
-	 NS_LOG_INFO( "CON "<<app_to_node[app_indx]<<" "<<content_indx<<" "<<connect_time);
-    Simulator::Schedule(Seconds(connect_time), &ndn::Consumer::FloodPacketWithSeq, cons, content_indx, 2);
+	 //NS_LOG_INFO( "CON "<<app_to_node[app_indx]<<" "<<content_indx<<" "<<connect_time);
+	 if(bcast_enabled)
+      Simulator::Schedule(Seconds(connect_time), &ndn::Consumer::FloodPacketWithSeq, cons, content_indx, bcast_scope);
+    else
+      Simulator::Schedule(Seconds(connect_time), &ndn::Consumer::SendPacketWithSeq, cons, content_indx);
+    num_connections++;
 	 connected_content[app_indx][content_indx]++;
     connect_time_next = connect_time + rng_exp_con(rnd_gen);
-    while(0)
-	 //while(disconnect_time < connect_time_next)
+    //while(0)
+	 while(disconnect_time < connect_time_next)
 	 { //randomly pick a connected content and disconnect
 	   if(0 == num_connected)
 		{
@@ -317,20 +386,29 @@ main(int argc, char* argv[])
 		{
         app_indx = rnd_gen()%(consumer_apps.GetN());
 		}while(connected_content[app_indx].begin() == connected_content[app_indx].end());
-		NS_LOG_INFO("PICK "<<app_to_node[app_indx]);
+		//NS_LOG_INFO("PICK "<<app_to_node[app_indx]);
 		auto it = connected_content[app_indx].begin();
-		NS_LOG_INFO("BEG: "<<it->first<<" "<<it->second);
+		//NS_LOG_INFO("BEG: "<<it->first<<" "<<it->second);
 		std::advance(it, rnd_gen() % connected_content[app_indx].size());
-      NS_LOG_INFO("DISCONN "<<app_to_node[app_indx]<<" "<<it->first<<" "<<disconnect_time<<" "<<it->second); 
+      //NS_LOG_INFO("DISCONN "<<app_to_node[app_indx]<<" "<<it->first<<" "<<disconnect_time<<" "<<it->second); 
+      num_disconnections++;
 		it->second = it->second - 1;
 		if(0 == it->second)
 		{
-		  const ndn::Name content("ndn://" + prefix + std::to_string(it->first));
+		  //const ndn::Name content("ndn://" + prefix + "/" + std::to_string(it->first));
+		  ndn::Name content("ndn://" + prefix);
+		  content.appendSequenceNumber(it->first);
         int access_node = app_to_node[app_indx];
 		  int router_node = access_to_router[access_node];
-        NS_LOG_INFO("RMV_SIT "<<access_node<<" "<<it->first<<" "<<disconnect_time<<" "<<it->second); 
+        //NS_LOG_INFO("RMV_SIT "<<access_node<<" "<<it->first<<" "<<disconnect_time<<" "<<it->second); 
         Simulator::Schedule(Seconds(disconnect_time), (void (*)(Ptr<Node>, const ndn::Name&, Ptr<Node>)) (&ndn::FibHelper::RemoveRoute), nodes.Get(router_node), content, nodes.Get(access_node));
+        Simulator::Schedule(Seconds(disconnect_time), (void (*)(Ptr<Node>, const ndn::Name&)) (&ndn::FibHelper::RemoveRoute), nodes.Get(access_node), content);
 		  connected_content[app_indx].erase(it);
+		  Ptr<Node> n = nodes.Get(access_node);
+		  Ptr<ndn::L3Protocol> p =  ndn::L3Protocol::getL3Protocol(n);
+		  shared_ptr<nfd::Forwarder> f = p->getForwarder();
+		  ns3::Ptr<ns3::ndn::ContentStore> cs = f->getContentStore();
+		  Simulator::Schedule(Seconds(disconnect_time), (&ns3::ndn::ContentStore::Remove), cs, content);
 		}
 		num_connected--;
       double lambda;
@@ -345,6 +423,8 @@ main(int argc, char* argv[])
 	 }//End of disconnections
 	 connect_time = connect_time_next;
   }//End of Observation Period
+  NS_LOG_INFO("Number of connections during observation period: "<<num_connections); 
+  NS_LOG_INFO("Number of disconnections during observation period: "<<num_disconnections); 
          
   Simulator::Stop(Seconds(observation_period_length + initialization_period_length));
 

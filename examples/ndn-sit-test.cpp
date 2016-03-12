@@ -211,6 +211,13 @@ main(int argc, char* argv[])
   NS_LOG_INFO("End_of_Params");
 
   NS_LOG_INFO("Number_of_infrastructure_nodes: "<<nodes.GetN()); 
+  /*
+  NS_LOG_INFO("Number_of_edges: "<<topo_reader.GetLinks().size()); 
+  NS_LOG_INFO("Number_of_backbone_routers: "<<topo_reader.GetBackboneRouters().GetN()); 
+  NS_LOG_INFO("Number_of_gateway_routers: "<<topo_reader.GetGatewayRouters().GetN()); 
+  NS_LOG_INFO("Number_of_customer_routers: "<<topo_reader.GetCustomerRouters().GetN()); 
+  exit(0);
+  */
   uint32_t num_infrastructure_nodes = nodes.GetN();
 
   std::map<int, int > app_to_node; //maps app index to access node index
@@ -244,11 +251,17 @@ main(int argc, char* argv[])
   ndn::StackHelper ndnHelperCaching;
   if(probability == 1)
   {
-    ndnHelperCaching.SetOldContentStore("ns3::ndn::cs::Lru", "MaxSize", std::to_string(cache_size));
+    if(cache_size > 0)
+      ndnHelperCaching.SetOldContentStore("ns3::ndn::cs::Lru", "MaxSize", std::to_string(cache_size));
+    else
+      ndnHelperCaching.SetOldContentStore("ns3::ndn::cs::Nocache");
   }
   else
   {
-    ndnHelperCaching.SetOldContentStore("ns3::ndn::cs::Probability::Lru", "MaxSize", std::to_string(cache_size), "CacheProbability", std::to_string(probability));
+    if(cache_size > 0)
+      ndnHelperCaching.SetOldContentStore("ns3::ndn::cs::Probability::Lru", "MaxSize", std::to_string(cache_size), "CacheProbability", std::to_string(probability));
+    else
+      ndnHelperCaching.SetOldContentStore("ns3::ndn::cs::Nocache");
   }
   ndnHelperCaching.Install(infrastructure_nodes);
 // Endpoint nodes get unlimited cache (this cache is the storage of all the applications connected to an infrastructure node)
